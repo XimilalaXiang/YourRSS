@@ -54,6 +54,16 @@ export BLINKO_TOKEN="your-blinko-api-token"
 
 ## Workflow
 
+### Step 0: Initialize Cortex reader agent
+
+Before first use, ensure the `reader` agent exists in Cortex:
+
+```bash
+node {baseDir}/scripts/cortex-api.mjs init
+```
+
+This checks if the `reader` agent exists and creates it if needed. Run this once or at the start of every digest session (idempotent).
+
 ### Step 1: Fetch articles from FreshRSS
 
 ```bash

@@ -135,16 +135,42 @@ async function recordDigest(date, topicList, categoryList, articleCount, feedCou
   );
 }
 
+async function ensureAgent() {
+  try {
+    const agents = await cortexFetch('/api/v1/agents');
+    const exists = agents.agents?.some(a => a.id === CORTEX_AGENT);
+    if (exists) {
+      process.stderr.write(`[cortex] Agent "${CORTEX_AGENT}" exists\n`);
+      return { status: 'exists', agent_id: CORTEX_AGENT };
+    }
+
+    const created = await cortexFetch('/api/v1/agents', 'POST', {
+      id: CORTEX_AGENT,
+      name: 'RSS Reader Agent',
+      description: 'AI-powered RSS reading assistant. Stores reading preferences, liked/disliked topics, favorite sources, and reading patterns for personalized digest recommendations.',
+    });
+    process.stderr.write(`[cortex] Agent "${CORTEX_AGENT}" created\n`);
+    return { status: 'created', agent: created };
+  } catch (e) {
+    process.stderr.write(`[cortex] Warning: could not ensure agent: ${e.message}\n`);
+    return { status: 'error', error: e.message };
+  }
+}
+
 async function main() {
   if (!command) {
     process.stderr.write('Usage: cortex-api.mjs <command> [args]\n');
-    process.stderr.write('Commands: recall, remember, forget, stats, preferences, like, dislike, digest-log\n');
+    process.stderr.write('Commands: init, recall, remember, forget, stats, preferences, like, dislike, digest-log\n');
     process.exit(1);
   }
 
   let result;
 
   switch (command) {
+    case 'init':
+      result = await ensureAgent();
+      break;
+
     case 'recall':
       result = await recall(args[1] || 'reading preferences');
       break;
