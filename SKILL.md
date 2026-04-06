@@ -133,18 +133,24 @@ Check `AI_PROVIDER` setting to decide who handles scoring:
 
 **Option A: AI_PROVIDER=openai (external model)**
 
-Use `score-articles.mjs` to offload scoring to a cheap external model:
+First, export user preferences from Cortex for the scoring model:
+
+```bash
+node {baseDir}/scripts/cortex-api.mjs preferences > /tmp/rss-prefs.json
+```
+
+Then pipe articles + preferences into the scoring script:
 
 ```bash
 node {baseDir}/scripts/fetch-freshrss.mjs --hours <HOURS> --count <COUNT> --unread \
-  | node {baseDir}/scripts/score-articles.mjs --top <N> --language zh
+  | node {baseDir}/scripts/score-articles.mjs --top <N> --language zh --preferences /tmp/rss-prefs.json
 ```
 
-The script calls the configured OpenAI-compatible API, scores all articles, and returns a JSON with pre-computed scores, summaries, categories, and keywords. The Agent then just formats and presents the results — minimal token usage.
+The script embeds user preferences (liked/disliked topics, preferred sources) into the scoring prompt, calls the configured OpenAI-compatible API, and returns a JSON with personalized scores, summaries, categories, keywords, and recommendation reasons. The Agent then just formats and presents the results — minimal token usage.
 
 Override model on-the-fly:
 ```bash
-... | node {baseDir}/scripts/score-articles.mjs --top 10 --provider openai --model gemini-2.5-flash-lite
+... | node {baseDir}/scripts/score-articles.mjs --top 10 --provider openai --model gemini-2.5-flash-lite --preferences /tmp/rss-prefs.json
 ```
 
 **Option B: AI_PROVIDER=agent (default — Agent does scoring)**
