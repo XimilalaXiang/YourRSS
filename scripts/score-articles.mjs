@@ -261,7 +261,7 @@ async function callOpenAI(prompt) {
         { role: 'user', content: prompt },
       ],
       temperature: 0.3,
-      max_tokens: 16384,
+      max_tokens: 65536,
     }),
   });
 
@@ -375,18 +375,28 @@ async function main() {
       }
       process.stderr.write(`[score] Phase 1: lightweight scoring — ${batches.length} batches × ${batchSize} articles, concurrency=${concurrency}\n`);
 
-      async function runBatch(batch, batchNum) {
-        process.stderr.write(`[score] Batch ${batchNum}: articles ${batch.offset}-${batch.offset + batch.items.length - 1} (started)\n`);
+      async function runBatch(batch, batchNum, attempt = 1) {
+        process.stderr.write(`[score] Batch ${batchNum}: articles ${batch.offset}-${batch.offset + batch.items.length - 1} (attempt ${attempt})\n`);
         try {
           const prompt = buildLightScoringPrompt(batch.items, language, prefs);
           const results = await callOpenAI(prompt);
           for (const r of results) {
             r.index = (r.index || 0) + batch.offset;
           }
+          const expected = batch.items.length;
+          if (results.length < expected && attempt < 2) {
+            process.stderr.write(`[score] Batch ${batchNum}: partial (${results.length}/${expected}), retrying...\n`);
+            const retryResults = await runBatch(batch, batchNum, attempt + 1);
+            return retryResults.length > results.length ? retryResults : results;
+          }
           process.stderr.write(`[score] Batch ${batchNum}: done (${results.length} scored)\n`);
           return results;
         } catch (err) {
-          process.stderr.write(`[score] Batch ${batchNum}: FAILED (${err.message})\n`);
+          if (attempt < 2) {
+            process.stderr.write(`[score] Batch ${batchNum}: FAILED (${err.message}), retrying...\n`);
+            return runBatch(batch, batchNum, attempt + 1);
+          }
+          process.stderr.write(`[score] Batch ${batchNum}: FAILED after retry (${err.message})\n`);
           return [];
         }
       }
