@@ -177,7 +177,7 @@ async function callOpenAI(prompt) {
         { role: 'user', content: prompt },
       ],
       temperature: 0.3,
-      max_tokens: 8192,
+      max_tokens: 16384,
     }),
   });
 
@@ -191,10 +191,32 @@ async function callOpenAI(prompt) {
 
   const jsonMatch = content.match(/\[[\s\S]*\]/);
   if (!jsonMatch) {
-    throw new Error(`AI returned non-JSON response: ${content.slice(0, 200)}`);
+    throw new Error(`AI returned non-JSON response: ${content.slice(0, 500)}`);
   }
 
-  return JSON.parse(jsonMatch[0]);
+  let jsonStr = jsonMatch[0];
+  try {
+    return JSON.parse(jsonStr);
+  } catch (firstErr) {
+    process.stderr.write(`[score] JSON parse failed, attempting repair...\n`);
+    jsonStr = jsonStr
+      .replace(/,\s*([}\]])/g, '$1')        // trailing commas
+      .replace(/(["\d])\s*\n\s*"/g, '$1,"') // missing commas between fields
+      .replace(/\}\s*\{/g, '},{');           // missing commas between objects
+    if (!jsonStr.endsWith(']')) {
+      const lastComplete = jsonStr.lastIndexOf('}');
+      if (lastComplete > 0) {
+        jsonStr = jsonStr.slice(0, lastComplete + 1) + ']';
+        process.stderr.write(`[score] Truncated JSON repaired (cut at pos ${lastComplete})\n`);
+      }
+    }
+    try {
+      return JSON.parse(jsonStr);
+    } catch (secondErr) {
+      process.stderr.write(`[score] JSON repair failed. Raw content (500 chars): ${content.slice(0, 500)}\n`);
+      throw new Error(`AI returned invalid JSON after repair: ${secondErr.message}`);
+    }
+  }
 }
 
 async function main() {
