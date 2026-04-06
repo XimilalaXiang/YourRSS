@@ -61,9 +61,10 @@ async function remember(content, category = 'preference', importance = 0.7) {
   return cortexFetch('/api/v1/memories', 'POST', {
     content,
     category,
+    layer: 'core',
     agent_id: CORTEX_AGENT,
     importance,
-    source: 'freshrss-ai-digest',
+    source: 'yourrss-skill',
   });
 }
 
