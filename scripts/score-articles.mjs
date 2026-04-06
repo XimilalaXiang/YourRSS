@@ -366,18 +366,38 @@ async function main() {
       const prompt = buildScoringPrompt(articles, language, prefs);
       allScored = await callOpenAI(prompt);
     } else {
-      process.stderr.write(`[score] Phase 1: lightweight scoring in ${Math.ceil(articles.length / batchSize)} batches\n`);
+      const totalBatches = Math.ceil(articles.length / batchSize);
+      process.stderr.write(`[score] Phase 1: lightweight scoring — ${totalBatches} batches (concurrent)\n`);
+
+      const batchPromises = [];
       for (let i = 0; i < articles.length; i += batchSize) {
         const batch = articles.slice(i, i + batchSize);
         const batchNum = Math.floor(i / batchSize) + 1;
-        process.stderr.write(`[score] Batch ${batchNum}: articles ${i}-${i + batch.length - 1}\n`);
-        const prompt = buildLightScoringPrompt(batch, language, prefs);
-        const batchResults = await callOpenAI(prompt);
-        for (const r of batchResults) {
-          r.index = (r.index || 0) + i;
-        }
-        allScored.push(...batchResults);
+        const offset = i;
+        batchPromises.push(
+          (async () => {
+            process.stderr.write(`[score] Batch ${batchNum}: articles ${offset}-${offset + batch.length - 1} (started)\n`);
+            try {
+              const prompt = buildLightScoringPrompt(batch, language, prefs);
+              const results = await callOpenAI(prompt);
+              for (const r of results) {
+                r.index = (r.index || 0) + offset;
+              }
+              process.stderr.write(`[score] Batch ${batchNum}: done (${results.length} scored)\n`);
+              return results;
+            } catch (err) {
+              process.stderr.write(`[score] Batch ${batchNum}: FAILED (${err.message})\n`);
+              return [];
+            }
+          })()
+        );
       }
+
+      const batchResults = await Promise.all(batchPromises);
+      for (const results of batchResults) {
+        allScored.push(...results);
+      }
+      process.stderr.write(`[score] Phase 1 complete: ${allScored.length}/${articles.length} articles scored\n`);
 
       for (const r of allScored) {
         const idx = r.index ?? -1;
