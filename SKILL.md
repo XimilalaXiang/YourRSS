@@ -208,22 +208,25 @@ Analyze selected articles and identify 2-3 macro trends.
 {2-3 sentence trend summary}
 
 🏆 今日必读 (Top 3)
-1. {Chinese title}
-   {source} · {relative time}
+1. [{Chinese title}]({url})
+   {source} · {relative time} · [{weighted_score}分]
    {summary}
    🏷️ {keywords}
    💡 推荐理由：{personalized reason from Cortex prefs}
+   🔗 {url}
 
 2. ...
 3. ...
 
 📋 更多精选
-4. {Chinese title} — {source} · {one-line summary}
+4. [{Chinese title}]({url}) — {source} · [{score}分] {one-line summary}
 5. ...
 
 📊 统计：{N} 源 → {M} 篇未读 → {K} 篇精选
 🧠 个性化：基于 Cortex reader agent ({pref_count} 条偏好记忆)
 ```
+
+**IMPORTANT: Every article MUST include its original URL.** The URL is available in the scored article data (`url` field). Never omit the link — it is the most important part for the user to access the original content.
 
 ### Step 7: Interactive Dialogue — Wait for User Feedback
 
@@ -278,6 +281,7 @@ This step repeats until the user says "结束" or leaves:
 
 **If user says "下一页" or "更多"**:
 - Show the next batch of articles (items N+1 to N+5 from the scored list)
+- Each article MUST include its original URL
 - Continue the feedback loop
 
 **If user says "保存 X"**:
@@ -325,14 +329,15 @@ node {baseDir}/scripts/fetch-freshrss.mjs --hours 48 --count 100 --unread
    - Match preferred sources (×1.3)
    - Penalize disliked topics (×0.3)
 
-4. Present top 5 with personalized explanation:
+4. Present top 5 with personalized explanation (always include URL):
 
 ```
 🎯 为你推荐 — 基于 Cortex reader 的 {N} 条阅读偏好
 
-1. {title}
+1. [{title}]({url})
    📍 {source} · {time}
    🧠 推荐原因：你经常关注 {topic}，这篇深入讨论了 {angle}
+   🔗 {url}
 
 2. ...
 ```
