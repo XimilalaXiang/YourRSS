@@ -1,15 +1,15 @@
 ---
 name: freshrss-ai-digest
-description: "AI-powered RSS digest from your FreshRSS instance with personalized recommendations. Trigger with /digest, /recommend, or ask for news/headlines. Fetches articles via FreshRSS API, scores by relevance/quality, generates summaries, learns preferences via Cortex Memory, and saves highlights to Blinko."
+description: "AI-powered RSS digest from your FreshRSS instance with personalized recommendations via Cortex Memory API. Trigger with /digest, /recommend, or ask for news/headlines. Fetches articles via FreshRSS API, scores by relevance/quality, generates summaries, learns preferences via Cortex REST API (agent: reader), and saves highlights to Blinko."
 ---
 
 # FreshRSS AI Digest
 
-AI-powered daily digest from your self-hosted FreshRSS instance. Scores, summarizes, and recommends articles based on your reading preferences.
+AI-powered daily digest from your self-hosted FreshRSS instance. Scores, summarizes, and recommends articles based on your reading preferences stored in Cortex Memory (agent: `reader`).
 
 ## Setup
 
-Set these environment variables:
+### Required: FreshRSS
 
 ```bash
 export FRESHRSS_URL="https://your-freshrss-instance.com"
@@ -17,41 +17,40 @@ export FRESHRSS_USER="your-username"
 export FRESHRSS_API_PASSWORD="your-api-password"
 ```
 
-Optional (for Blinko integration):
+API password: FreshRSS → Settings → Profile → API Management.
+
+### Required: Cortex Memory
+
+```bash
+export CORTEX_URL="http://localhost:21100"
+export CORTEX_TOKEN="your-cortex-auth-token"    # optional if no auth
+export CORTEX_AGENT="reader"                     # isolated agent for RSS preferences
+```
+
+### Optional: Blinko
 
 ```bash
 export BLINKO_URL="https://your-blinko-instance.com"
 export BLINKO_TOKEN="your-blinko-api-token"
 ```
 
-API password is set in FreshRSS → Settings → Profile → API Management.
-
 ## Commands
 
-### Daily Digest
-
-User says `/digest` or asks for a news digest/daily briefing.
+### Daily Digest: `/digest`
 
 **Parameters** (ask user if not specified):
 
 | Param | Options | Default |
 |-------|---------|---------|
 | Time range | 4h / 12h / 24h / 48h / 72h | 24h |
-| Top N articles | 5 / 10 / 15 / 20 | 10 |
+| Top N | 5 / 10 / 15 / 20 | 10 |
 | Language | zh / en | zh |
 | Category | any FreshRSS category | all |
 
-### Personalized Recommendations
-
-User says `/recommend` or asks "what should I read?"
-
-### Save to Blinko
-
-User says `/save [article number]` or asks to save an article.
-
-### Browse
-
-User says `/feeds` or `/categories` to explore FreshRSS content.
+### Recommendations: `/recommend`
+### Save: `/save [number]`
+### Preference: `/like [number]`, `/dislike [number]`, `/prefer topic:X`
+### Browse: `/feeds`, `/categories`
 
 ## Workflow
 
@@ -61,50 +60,53 @@ User says `/feeds` or `/categories` to explore FreshRSS content.
 node {baseDir}/scripts/fetch-freshrss.mjs --hours <HOURS> --count 50 --unread
 ```
 
-For specific category:
+Category-specific:
 ```bash
-node {baseDir}/scripts/fetch-freshrss.mjs --hours <HOURS> --count 50 --unread --category "Technology"
+node {baseDir}/scripts/fetch-freshrss.mjs --hours 24 --count 50 --unread --category "Technology"
 ```
 
-List categories:
+List categories / feeds:
 ```bash
 node {baseDir}/scripts/fetch-freshrss.mjs --categories
-```
-
-List feeds:
-```bash
 node {baseDir}/scripts/fetch-freshrss.mjs --feeds
 ```
 
-The script outputs JSON to stdout. Capture it.
+Capture the JSON output from stdout.
 
-### Step 2: Load user preferences from Memory
+### Step 2: Load user preferences from Cortex (REST API)
 
-Before scoring, check if we know user preferences:
+Fetch user reading preferences from the `reader` agent:
 
-**Memory query**: Search memory for "RSS reading preferences", "favorite topics", "article interests", and "reading history patterns".
+```bash
+node {baseDir}/scripts/cortex-api.mjs preferences
+```
 
-Use any returned preferences to bias the scoring in Step 3. For example:
-- If user prefers "AI security" → boost security + AI articles
-- If user marked "boring: cryptocurrency news" → lower crypto scores
-- If user frequently saves Go/Rust articles → boost programming language content
+This queries Cortex for all preference, fact, insight, and habit memories related to RSS reading.
+The output is a JSON array of memory objects.
 
-If no preferences found, proceed with neutral scoring.
+Parse the returned memories to build a preference profile:
+- **Liked topics**: extract topic keywords from "User liked article..." memories
+- **Disliked topics**: extract from "User found uninteresting..." memories
+- **Preferred sources**: extract source names from liked article memories
+- **Reading patterns**: extract from digest log memories (time, frequency, categories)
+
+If no preferences found (first run), proceed with neutral scoring.
 
 ### Step 3: Score and classify
 
-From the fetched articles JSON, score each article on three dimensions (1-10):
+Score each article on three dimensions (1-10):
 
-1. **Relevance** — How relevant to the user's known interests (from Memory). If no preferences, score based on general tech/AI relevance.
-2. **Quality** — Depth of insight, originality, technical substance (from title + summary)
-3. **Timeliness** — Breaking news or emerging trend vs. evergreen content
+1. **Relevance** — Match against user preferences from Cortex. If no prefs, score on general tech/AI relevance.
+2. **Quality** — Depth, originality, substance (from title + summary).
+3. **Timeliness** — Breaking vs. evergreen.
 
-Apply preference multipliers:
-- Topics matching user favorites: score × 1.3
-- Topics matching user dislikes: score × 0.5
-- Sources user frequently saves from: score × 1.2
+Apply preference multipliers from Cortex data:
+- Topics matching liked topics: score × 1.3
+- Topics matching disliked topics: score × 0.5
+- Sources from liked articles: score × 1.2
+- Topics explicitly preferred (/prefer): score × 1.5
 
-Classify into categories:
+Classify:
 - 🤖 AI / ML
 - 🔒 Security
 - ⚙️ Engineering
@@ -114,40 +116,38 @@ Classify into categories:
 - 📊 Data / Infrastructure
 - 📝 Other
 
-Select the top N articles by total weighted score.
+Select top N by weighted score.
 
 ### Step 4: Generate summaries
 
 For each selected article:
-1. If `summary` from FreshRSS is sufficient (>100 chars), use it as basis
-2. If not, use `web_fetch` or equivalent to read the full article
-3. Generate a structured summary:
-   - Chinese title translation (keep original as link text)
-   - 2-3 sentence summary: core problem → key insight → conclusion
-   - Recommendation reason (1 sentence, personalized if preferences available)
+1. If summary > 100 chars, use it
+2. If not, use web_fetch to read full article
+3. Generate:
+   - Chinese title translation (original as link)
+   - 2-3 sentence summary: problem → insight → conclusion
+   - Personalized recommendation reason (using Cortex preferences if available)
    - Keywords (2-3 tags)
 
-### Step 5: Generate trend highlights
+### Step 5: Trend highlights
 
-Analyze all selected articles together and identify 2-3 macro trends.
+Analyze selected articles and identify 2-3 macro trends.
 
 ### Step 6: Format output
-
-Output as a Telegram-friendly message:
 
 ```
 📰 FreshRSS AI Digest — {date}
 来自你的 FreshRSS 订阅 · {feed_count} 源 · {hours}h 窗口
 
 📝 今日看点
-{2-3 sentence macro trend summary}
+{2-3 sentence trend summary}
 
 🏆 今日必读 (Top 3)
 1. {Chinese title}
    {source} · {relative time}
    {summary}
    🏷️ {keywords}
-   💡 推荐理由：{personalized reason}
+   💡 推荐理由：{personalized reason from Cortex prefs}
 
 2. ...
 3. ...
@@ -157,78 +157,116 @@ Output as a Telegram-friendly message:
 5. ...
 
 📊 统计：{N} 源 → {M} 篇未读 → {K} 篇精选
-🧠 个性化：{preference_status}
+🧠 个性化：基于 Cortex reader agent ({pref_count} 条偏好记忆)
 ```
 
-### Step 7: Update Memory with reading patterns
+### Step 7: Log digest to Cortex
 
-After generating the digest, store a brief observation to memory:
+After generating, log this digest session:
 
-**Memory store**: "User received digest on {date}. Topics covered: {topic list}. Top scored categories: {categories}. {N} articles from {M} feeds."
+```bash
+node {baseDir}/scripts/cortex-api.mjs digest-log "{date}" \
+  --topics "AI,Security,Go" \
+  --categories "AI/ML,Engineering" \
+  --articles 10 \
+  --feeds 45
+```
 
-This builds up the preference model over time.
+This builds the preference model over time.
 
 ## Personalized Recommendations (/recommend)
 
-When user asks for recommendations:
-
-1. **Load full preference profile** from Memory — search for all RSS-related memories
-2. Fetch recent unread articles from FreshRSS (last 48h)
-3. Score articles heavily weighted by preference profile:
-   - Match against favorite topics (from memory)
-   - Match against preferred sources (from memory)
-   - Penalize topics user has shown disinterest in
-4. Present top 5 with personalized explanation of why each was recommended
-
-Format:
+1. Load full preference profile:
+```bash
+node {baseDir}/scripts/cortex-api.mjs preferences
 ```
-🎯 为你推荐 — 基于你的阅读偏好
+
+2. Fetch recent unread articles (48h):
+```bash
+node {baseDir}/scripts/fetch-freshrss.mjs --hours 48 --count 100 --unread
+```
+
+3. Score heavily weighted by Cortex preferences:
+   - Match favorite topics (×1.5)
+   - Match preferred sources (×1.3)
+   - Penalize disliked topics (×0.3)
+
+4. Present top 5 with personalized explanation:
+
+```
+🎯 为你推荐 — 基于 Cortex reader 的 {N} 条阅读偏好
 
 1. {title}
    📍 {source} · {time}
-   🧠 推荐原因：你经常关注 {topic}，这篇文章深入讨论了 {specific_angle}
+   🧠 推荐原因：你经常关注 {topic}，这篇深入讨论了 {angle}
 
 2. ...
 ```
 
 ## Preference Learning
 
-Users can teach the system:
+### /like [number]
 
-- "/like 3" → Remember that user liked article 3 (store topic + source preference)
-- "/dislike 2" → Remember that user found article 2 uninteresting
-- "/prefer topic:AI security" → Explicitly add preference
-- "/forget topic:crypto" → Remove a preference
+Record a positive preference to Cortex:
 
-For each interaction, store to memory:
+```bash
+node {baseDir}/scripts/cortex-api.mjs like "{article_title}" \
+  --source "{source_name}" \
+  --topics "AI,Security" \
+  --url "https://..."
+```
 
-- **Like**: "User liked article about {topic} from {source}. Tags: {tags}"
-- **Dislike**: "User found article about {topic} uninteresting"
-- **Explicit preference**: "User explicitly prefers {topic}"
+### /dislike [number]
+
+Record a negative signal:
+
+```bash
+node {baseDir}/scripts/cortex-api.mjs dislike "{article_title}" \
+  --source "{source_name}" \
+  --topics "Crypto,NFT"
+```
+
+### /prefer topic:X
+
+Explicit preference:
+
+```bash
+node {baseDir}/scripts/cortex-api.mjs remember "User explicitly prefers reading about: {topic}" --category preference --importance 0.9
+```
+
+### /forget topic:X
+
+Remove preference:
+
+```bash
+# First search for the memory
+node {baseDir}/scripts/cortex-api.mjs search "{topic} preference"
+# Then delete by ID
+node {baseDir}/scripts/cortex-api.mjs forget "{memory_id}"
+```
 
 ## Save to Blinko (/save)
 
-When user says `/save 3` or asks to save an article:
+When user says `/save 3`:
 
-1. Get the article details (title, URL, summary, tags)
-2. If BLINKO_URL and BLINKO_TOKEN are set, POST to Blinko API:
+1. Get article details (title, URL, summary, tags)
+2. If BLINKO_URL and BLINKO_TOKEN are set:
+   ```bash
+   curl -X POST "${BLINKO_URL}/api/v1/note/upsert" \
+     -H "Authorization: Bearer ${BLINKO_TOKEN}" \
+     -H "Content-Type: application/json" \
+     -d '{"content": "# {title}\n\n{summary}\n\n[Original]({url})\n\n#rss-digest #{category}", "type": 0}'
    ```
-   POST {BLINKO_URL}/api/v1/note/upsert
-   Headers: Authorization: Bearer {BLINKO_TOKEN}
-   Body: {
-     "content": "# {title}\n\n{summary}\n\n[Original]({url})\n\n#rss-digest #{category}",
-     "type": 0
-   }
+3. After saving, record to Cortex:
+   ```bash
+   node {baseDir}/scripts/cortex-api.mjs remember "User saved article '{title}' from {source} about {topics} to Blinko" --category preference --importance 0.8
    ```
-3. If Blinko is not configured, format the article for manual saving
-
-After saving, store to memory: "User saved article about {topic} from {source} to Blinko"
 
 ## Notes
 
-- The fetch script requires Node.js 18+ (available on OpenClaw/Cursor/Claude Code environments)
-- FreshRSS API password is separate from your login password
-- The skill works with any MCP-compatible client: OpenClaw, Cursor, Claude Code, OpenCode
-- Memory integration is optional but recommended for personalization
-- All data stays on your infrastructure — FreshRSS is self-hosted, Memory is local
-- Default fetch count is 50 articles; adjust --count for busier feeds
+- Requires Node.js 18+ for the scripts
+- FreshRSS API password ≠ login password
+- Cortex agent `reader` is auto-created on first API call
+- Works with OpenClaw, Cursor, Claude Code, OpenCode — any client that can run shell scripts
+- All data self-hosted: FreshRSS + Cortex + Blinko = your infrastructure
+- Default fetch: 50 articles; adjust --count for busier feeds

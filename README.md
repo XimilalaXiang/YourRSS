@@ -1,18 +1,18 @@
 # FreshRSS AI Digest
 
-AI-powered RSS digest from your self-hosted FreshRSS instance. Fetches articles, scores by relevance/quality, generates summaries, learns your preferences, and recommends content — all through your AI agent.
+AI-powered RSS digest from your self-hosted FreshRSS. Fetches articles, scores by relevance/quality, generates summaries, and learns your preferences through [Cortex](https://github.com/rikouu/cortex) Memory — getting smarter with every digest.
 
-Works with **OpenClaw**, **Cursor**, **Claude Code**, **OpenCode**, and any MCP-compatible AI client.
+Works with **OpenClaw**, **Cursor**, **Claude Code**, **OpenCode**, and any AI agent that can run shell scripts.
 
 ## Features
 
 - **Smart Digest** — AI scores and summarizes your FreshRSS articles into a daily briefing
-- **Personalized Recommendations** — Learns your preferences via Memory, gets better over time
-- **Preference Learning** — Like/dislike articles to teach the system what you enjoy
+- **Personalized Recommendations** — Cortex Memory `reader` agent learns what you like
+- **Preference Learning** — Like/dislike to teach the system; explicit `/prefer` commands
 - **Blinko Integration** — Save highlights to your Blinko knowledge base
-- **Multi-language** — Chinese and English output support
+- **Multi-language** — Chinese and English output
 - **Category Filtering** — Focus on specific FreshRSS categories
-- **100% Self-hosted** — Your data stays on your infrastructure
+- **100% Self-hosted** — FreshRSS + Cortex + Blinko = your infrastructure
 
 ## Quick Start
 
@@ -22,15 +22,9 @@ Works with **OpenClaw**, **Cursor**, **Claude Code**, **OpenCode**, and any MCP-
 clawhub install freshrss-ai-digest
 ```
 
-Then in any chat:
+Then: `/digest`
 
-```
-/digest
-```
-
-### Cursor / Claude Code
-
-Copy the skill to your workspace:
+### Cursor / Claude Code / Other Agents
 
 ```bash
 git clone https://github.com/XimilalaXiang/freshrss-ai-digest.git
@@ -38,17 +32,9 @@ git clone https://github.com/XimilalaXiang/freshrss-ai-digest.git
 
 Reference the `SKILL.md` in your agent configuration.
 
-### Manual Installation
-
-```bash
-git clone https://github.com/XimilalaXiang/freshrss-ai-digest.git ~/.openclaw/workspace/skills/freshrss-ai-digest
-```
-
 ## Setup
 
-### Required
-
-Set these environment variables:
+### 1. FreshRSS (Required)
 
 ```bash
 export FRESHRSS_URL="https://your-freshrss-instance.com"
@@ -56,101 +42,129 @@ export FRESHRSS_USER="your-username"
 export FRESHRSS_API_PASSWORD="your-api-password"
 ```
 
-API password: FreshRSS → Settings → Profile → API Management.
+### 2. Cortex Memory (Required)
 
-### Optional (Blinko)
+```bash
+export CORTEX_URL="http://localhost:21100"
+export CORTEX_TOKEN="your-auth-token"    # optional
+export CORTEX_AGENT="reader"              # isolated namespace for RSS
+```
+
+The `reader` agent is auto-created on first use. Your RSS preferences are isolated from other Cortex agents.
+
+### 3. Blinko (Optional)
 
 ```bash
 export BLINKO_URL="https://your-blinko-instance.com"
-export BLINKO_TOKEN="your-blinko-api-token"
+export BLINKO_TOKEN="your-api-token"
 ```
 
 ## How It Works
 
 ```
-FreshRSS API → Fetch Articles → Memory Preferences → AI Scoring → AI Summary → Digest
+FreshRSS API → Fetch Articles → Cortex Preferences → AI Scoring → AI Summary → Digest
      │              │                   │                  │             │           │
-  Google Reader  fetch-freshrss.mjs  Cortex/Memory     relevance/    2-3 sentence  Telegram
-  API            (Node.js 18+)       user preferences  quality/       summaries     message
-                                                        timeliness
+  Google Reader  fetch-freshrss.mjs  REST API to       relevance/    2-3 sentence  Telegram
+  API            (zero deps)         reader agent      quality/       summaries     message
+                                     /api/v1/recall    timeliness
+```
+
+**Personalization loop:**
+```
+User reads digest → /like or /dislike → Cortex stores preference
+     ↓                                          ↓
+Next digest ← scores biased by preferences ← Cortex recalls
 ```
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `/digest` | Generate today's AI digest |
+| `/digest` | Generate AI digest (default: last 24h) |
 | `/digest 48h` | Digest from last 48 hours |
-| `/recommend` | Get personalized recommendations |
-| `/like 3` | Mark article 3 as interesting |
-| `/dislike 2` | Mark article 2 as uninteresting |
+| `/recommend` | Personalized recommendations from Cortex |
+| `/like 3` | Like article 3 → stored in Cortex |
+| `/dislike 2` | Dislike article 2 → stored in Cortex |
 | `/save 1` | Save article 1 to Blinko |
-| `/feeds` | List your FreshRSS feeds |
-| `/categories` | List your FreshRSS categories |
-| `/prefer topic:AI security` | Add an explicit preference |
+| `/prefer topic:AI security` | Explicit preference |
+| `/forget topic:crypto` | Remove a preference |
+| `/feeds` | List FreshRSS subscriptions |
+| `/categories` | List FreshRSS categories |
 
-## Personalization
+## Scripts
 
-The skill learns from your interactions:
+| Script | Purpose |
+|--------|---------|
+| `scripts/fetch-freshrss.mjs` | FreshRSS Google Reader API client |
+| `scripts/cortex-api.mjs` | Cortex Memory REST API client |
+| `scripts/fetch-rss.mjs` | Static RSS fetcher (legacy fallback) |
 
-1. **Implicit** — Articles you save, like, or read build a preference profile
-2. **Explicit** — Use `/prefer` and `/forget` to manually adjust
-3. **Progressive** — Recommendations improve over time as Memory accumulates data
+### fetch-freshrss.mjs
 
-Preferences are stored via Memory (Cortex or similar), persisting across sessions.
+```bash
+# Fetch unread articles from last 24h
+node scripts/fetch-freshrss.mjs --hours 24 --count 50 --unread
 
-## Configuration
+# Filter by category
+node scripts/fetch-freshrss.mjs --hours 24 --category "Technology" --unread
 
-### Time Range
-
-```
-/digest 4h      # Last 4 hours
-/digest 24h     # Last 24 hours (default)
-/digest 48h     # Last 48 hours
-/digest 72h     # Last 72 hours
-```
-
-### Category Filter
-
-```
-/digest --category Technology
-/digest --category "AI & ML"
+# List categories / feeds
+node scripts/fetch-freshrss.mjs --categories
+node scripts/fetch-freshrss.mjs --feeds
 ```
 
-### Article Count
+### cortex-api.mjs
 
-Default: top 10 articles. Ask for more: "give me top 20 articles".
+```bash
+# Get user preferences
+node scripts/cortex-api.mjs preferences
+
+# Record a like
+node scripts/cortex-api.mjs like "Article Title" --source "Blog" --topics "AI,Go"
+
+# Search memories
+node scripts/cortex-api.mjs recall "favorite topics"
+
+# Store a memory
+node scripts/cortex-api.mjs remember "User prefers Go articles" --category preference
+
+# Log a digest session
+node scripts/cortex-api.mjs digest-log "2026-04-06" --topics "AI,Security" --articles 10
+```
 
 ## Project Structure
 
 ```
 freshrss-ai-digest/
-├── SKILL.md                  # Skill definition (scoring, memory, recommendations)
-├── README.md                 # This file
+├── SKILL.md                  # Skill definition (AI workflow + Cortex + Blinko)
+├── README.md
 ├── scripts/
 │   ├── fetch-freshrss.mjs    # FreshRSS API client (Node.js, zero deps)
-│   └── fetch-rss.mjs         # Original static RSS fetcher (legacy)
+│   ├── cortex-api.mjs        # Cortex Memory REST API client (zero deps)
+│   └── fetch-rss.mjs         # Static RSS fetcher (legacy)
 └── references/
-    └── sources.json           # Fallback static sources (not used with FreshRSS)
+    └── sources.json           # Fallback static sources
 ```
 
 ## vs. Other Skills
 
-| Feature | freshrss-reader | rss-digest | ai-daily-digest | **This Skill** |
-|---------|----------------|------------|-----------------|---------------|
+| Feature | freshrss-reader | rss-digest | ai-daily-digest | **This** |
+|---------|----------------|------------|-----------------|----------|
 | FreshRSS API | ✅ | ❌ | ❌ | ✅ |
 | AI Scoring | ❌ | ✅ | ✅ | ✅ |
 | AI Summaries | ❌ | ✅ | ✅ | ✅ |
-| Personalization | ❌ | ❌ | ❌ | ✅ Memory |
+| Cortex Memory | ❌ | ❌ | ❌ | ✅ REST API |
 | Preference Learning | ❌ | ❌ | ❌ | ✅ Like/Dislike |
+| Personalized Recs | ❌ | ❌ | ❌ | ✅ |
 | Blinko Save | ❌ | ❌ | ❌ | ✅ |
-| Multi-client | ✅ | OpenClaw | OpenClaw | ✅ Any MCP |
+| Multi-client | ✅ | OpenClaw | OpenClaw | ✅ Any |
 
 ## Requirements
 
-- Node.js 18+ (for the fetch script)
-- A self-hosted FreshRSS instance with API access enabled
-- `jq` (optional, for debugging)
+- Node.js 18+
+- Self-hosted FreshRSS with API access
+- Self-hosted Cortex Memory server
+- (Optional) Blinko for knowledge retention
 
 ## License
 
@@ -159,5 +173,5 @@ MIT
 ## Credits
 
 - Forked from [ai-daily-digest](https://github.com/HarrisHan/ai-daily-digest) by HarrisHan
-- FreshRSS API integration inspired by [freshrss-reader](https://github.com/openclaw/skills/tree/main/skills/nickian/freshrss-reader) by nickian
-- Built for the open AI agent ecosystem
+- Memory powered by [Cortex](https://github.com/rikouu/cortex) by rikouu
+- FreshRSS API inspired by [freshrss-reader](https://github.com/openclaw/skills/tree/main/skills/nickian/freshrss-reader)
