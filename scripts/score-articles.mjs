@@ -150,7 +150,11 @@ Return a JSON array of the top ${topN} articles sorted by weighted_score descend
 }]
 
 Articles to score:
-${articles.map((a, i) => `[${i}] Title: ${a.title}\n    Source: ${a.source}\n    Time: ${a.published}\n    Summary: ${(a.summary || '').slice(0, 300)}\n    URL: ${a.url}`).join('\n\n')}
+${articles.map((a, i) => {
+  const text = a.content || a.summary || '';
+  const displayText = text.length > 1500 ? text.slice(0, 1500) + '...' : text;
+  return `[${i}] Title: ${a.title}\n    Source: ${a.source}\n    Time: ${a.date || a.published || ''}\n    Content (${text.length} chars): ${displayText}\n    URL: ${a.link || a.url || ''}`;
+}).join('\n\n')}
 
 Return ONLY the JSON array, no markdown fences, no explanation.`;
 }

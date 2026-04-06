@@ -198,7 +198,8 @@ async function getArticles(token) {
 
   return items.map(item => {
     const link = item.canonical?.[0]?.href || item.alternate?.[0]?.href || '';
-    const summary = stripHtml(item.summary?.content || '').slice(0, 500);
+    const rawContent = item.summary?.content || '';
+    const content = stripHtml(rawContent);
     const timestamp = (item.published || 0) * 1000;
     const categories = (item.categories || [])
       .filter(c => c.includes('/label/'))
@@ -208,7 +209,9 @@ async function getArticles(token) {
       id: item.id || '',
       title: item.title || '(no title)',
       link,
-      summary,
+      content,
+      summary: content.slice(0, 300),
+      content_length: content.length,
       timestamp,
       date: timestamp ? new Date(timestamp).toISOString() : '',
       source: item.origin?.title || '',
