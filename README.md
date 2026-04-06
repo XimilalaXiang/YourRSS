@@ -11,7 +11,7 @@ Works with **OpenClaw**, **Cursor**, **Claude Code**, **OpenCode**, and any AI a
 ## Features
 
 - **Smart Digest** — AI scores and ranks your RSS articles into a daily briefing
-- **Flexible AI Provider** — Use the current Agent (free with Cursor) or an external cheap model (OpenAI, Gemini, DeepSeek, Qwen, Ollama, or any OpenAI-compatible gateway)
+- **Flexible AI Provider** — Use the current Agent or an external model (OpenAI, Gemini, DeepSeek, Qwen, Ollama, or any OpenAI-compatible gateway)
 - **Full-text Analysis** — Scores based on complete article content, not just summaries
 - **Concurrent Processing** — Configurable batch size and concurrency for fast scoring (300 articles in ~3min)
 - **Two-phase Scoring** — Lightweight scores for all articles + detailed summaries for top N
@@ -66,7 +66,7 @@ The `reader` agent is auto-created on first use. Your RSS preferences are isolat
 ### 3. AI Scoring Provider (Optional)
 
 ```bash
-# "agent" = Agent handles scoring (free with Cursor)
+# "agent" = Agent handles scoring (the AI agent in your current session)
 # "openai" = external OpenAI-compatible API (saves Agent tokens)
 export AI_PROVIDER="agent"
 export AI_BASE_URL="https://api.openai.com/v1"   # or your gateway
