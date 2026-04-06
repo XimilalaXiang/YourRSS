@@ -1,15 +1,17 @@
-# FreshRSS AI Digest
+# YourRSS
 
-AI-powered RSS digest from your self-hosted FreshRSS. Fetches articles, scores by relevance/quality, generates summaries, and learns your preferences through [Cortex](https://github.com/rikouu/cortex) Memory — getting smarter with every digest.
+Your personal AI-powered RSS digest — built on self-hosted FreshRSS.
+
+YourRSS fetches articles from your FreshRSS instance, scores them by relevance and quality with AI, generates concise summaries, and learns your reading preferences through [Cortex](https://github.com/rikouu/cortex) Memory. Every digest gets smarter.
 
 Works with **OpenClaw**, **Cursor**, **Claude Code**, **OpenCode**, and any AI agent that can run shell scripts.
 
 ## Features
 
-- **Smart Digest** — AI scores and summarizes your FreshRSS articles into a daily briefing
-- **Flexible AI Provider** — Use the current Agent (free with Cursor) or an external cheap model (OpenAI, Gemini, DeepSeek, Qwen, Ollama, or any gateway)
+- **Smart Digest** — AI scores and ranks your RSS articles into a daily briefing
+- **Flexible AI Provider** — Use the current Agent (free with Cursor) or an external cheap model (OpenAI, Gemini, DeepSeek, Qwen, Ollama, or any OpenAI-compatible gateway)
 - **Full-text Analysis** — Scores based on complete article content, not just summaries
-- **Concurrent Processing** — Configurable batch size and concurrency for fast scoring (200 articles in ~2min)
+- **Concurrent Processing** — Configurable batch size and concurrency for fast scoring (300 articles in ~3min)
 - **Two-phase Scoring** — Lightweight scores for all articles + detailed summaries for top N
 - **Personalized Recommendations** — Cortex Memory `reader` agent learns what you like
 - **Preference Learning** — Like/dislike to teach the system; explicit `/prefer` commands
@@ -17,14 +19,14 @@ Works with **OpenClaw**, **Cursor**, **Claude Code**, **OpenCode**, and any AI a
 - **Blinko Integration** — Save highlights to your Blinko knowledge base
 - **Multi-language** — Chinese and English output
 - **Category Filtering** — Focus on specific FreshRSS categories
-- **100% Self-hosted** — FreshRSS + Cortex + Blinko = your infrastructure
+- **100% Self-hosted** — FreshRSS + Cortex + Blinko = your infrastructure, your data
 
 ## Quick Start
 
 ### OpenClaw
 
 ```bash
-clawhub install freshrss-ai-digest
+clawhub install yourrss
 ```
 
 Then: `/digest`
@@ -47,6 +49,8 @@ export FRESHRSS_USER="your-username"
 export FRESHRSS_API_PASSWORD="your-api-password"
 ```
 
+Or create a `.env` file in the project root (see `.env.example`).
+
 ### 2. Cortex Memory (Required)
 
 ```bash
@@ -68,7 +72,7 @@ export AI_API_KEY="sk-..."
 export AI_MODEL="gpt-4o-mini"
 ```
 
-Compatible with: OpenAI, Gemini, DeepSeek, Qwen, Ollama, or any OpenAI-compatible proxy.
+Compatible with: OpenAI, Gemini, DeepSeek, Qwen, Ollama, or any OpenAI-compatible proxy (e.g. [vercel-gateway-tools](https://github.com/XimilalaXiang/vercel-gateway-tools)).
 
 ### 4. Blinko (Optional)
 
@@ -108,6 +112,8 @@ Next digest ← scores biased by preferences ← Cortex recalls
 | `/forget topic:crypto` | Remove a preference |
 | `/feeds` | List FreshRSS subscriptions |
 | `/categories` | List FreshRSS categories |
+| `/subscribe <url>` | Subscribe to a new feed |
+| `/unsubscribe <id>` | Unsubscribe from a feed |
 
 ## Scripts
 
@@ -117,7 +123,6 @@ Next digest ← scores biased by preferences ← Cortex recalls
 | `scripts/cortex-api.mjs` | Cortex Memory REST API client |
 | `scripts/score-articles.mjs` | AI scoring: agent passthrough or external OpenAI API |
 | `scripts/load-env.mjs` | Load .env config (shared by all scripts) |
-| `scripts/fetch-rss.mjs` | Static RSS fetcher (legacy fallback) |
 
 ### fetch-freshrss.mjs
 
@@ -150,11 +155,11 @@ node scripts/fetch-freshrss.mjs --hours 48 --count 200 \
   | node scripts/score-articles.mjs --top 15 --preferences /tmp/prefs.json
 
 # Tune batch size and concurrency
-node scripts/fetch-freshrss.mjs --hours 72 --count 200 \
+node scripts/fetch-freshrss.mjs --hours 72 --count 300 \
   | node scripts/score-articles.mjs --top 20 --batch-size 10 --concurrency 20
 
 # Override model on-the-fly
-... | node scripts/score-articles.mjs --provider openai --model gpt-4o-mini
+... | node scripts/score-articles.mjs --provider openai --model google/gemini-3-flash
 ```
 
 ### cortex-api.mjs
@@ -190,16 +195,15 @@ YourRSS/
 │   ├── fetch-freshrss.mjs    # FreshRSS API client (Node.js, zero deps)
 │   ├── score-articles.mjs    # AI scoring: agent passthrough or external API
 │   ├── cortex-api.mjs        # Cortex Memory REST API client (zero deps)
-│   ├── load-env.mjs          # .env loader (shared by all scripts)
-│   └── fetch-rss.mjs         # Static RSS fetcher (legacy)
+│   └── load-env.mjs          # .env loader (shared by all scripts)
 └── references/
     └── sources.json           # Fallback static sources
 ```
 
-## vs. Other Skills
+## Comparison
 
-| Feature | freshrss-reader | rss-digest | ai-daily-digest | **This** |
-|---------|----------------|------------|-----------------|----------|
+| Feature | freshrss-reader | rss-digest | ai-daily-digest | **YourRSS** |
+|---------|----------------|------------|-----------------|-------------|
 | FreshRSS API | ✅ | ❌ | ❌ | ✅ |
 | AI Scoring | ❌ | ✅ | ✅ | ✅ |
 | AI Summaries | ❌ | ✅ | ✅ | ✅ |
@@ -207,14 +211,18 @@ YourRSS/
 | Preference Learning | ❌ | ❌ | ❌ | ✅ Like/Dislike |
 | Personalized Recs | ❌ | ❌ | ❌ | ✅ |
 | Blinko Save | ❌ | ❌ | ❌ | ✅ |
+| Full-text Scoring | ❌ | ❌ | ❌ | ✅ |
+| Concurrent Processing | ❌ | ❌ | ❌ | ✅ |
+| Flexible AI Provider | ❌ | ❌ | ❌ | ✅ |
 | Multi-client | ✅ | OpenClaw | OpenClaw | ✅ Any |
 
 ## Requirements
 
 - Node.js 18+
-- Self-hosted FreshRSS with API access
+- Self-hosted FreshRSS with API access enabled
 - Self-hosted Cortex Memory server
 - (Optional) Blinko for knowledge retention
+- (Optional) OpenAI-compatible API for external scoring
 
 ## License
 
