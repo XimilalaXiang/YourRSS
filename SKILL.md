@@ -160,9 +160,71 @@ Analyze selected articles and identify 2-3 macro trends.
 🧠 个性化：基于 Cortex reader agent ({pref_count} 条偏好记忆)
 ```
 
-### Step 7: Log digest to Cortex
+### Step 7: Interactive Dialogue — Wait for User Feedback
 
-After generating, log this digest session:
+**CRITICAL: Do NOT end the conversation after showing the digest.** This is a multi-turn interactive session.
+
+After presenting the digest, ask the user:
+
+```
+你对今天的精选有什么想法？
+- 回复数字（如 "1"、"3"）查看文章详情
+- 说 "喜欢 1" 或 "不感兴趣 4" 来训练推荐
+- 说 "多看看 AI 安全" 来调整偏好
+- 说 "保存 2" 保存到 Blinko
+- 说 "下一页" 查看更多文章
+- 说 "结束" 结束本次阅读
+```
+
+### Step 8: Process User Feedback (Multi-turn Loop)
+
+This step repeats until the user says "结束" or leaves:
+
+**If user replies with a number** (e.g., "1", "看看第3篇"):
+- Fetch the full article content via web_fetch
+- Present a detailed summary with key takeaways
+- Ask: "这篇文章怎么样？觉得有用吗？"
+
+**If user says "喜欢 X" or positive feedback** (e.g., "不错", "这个好"):
+- Identify the article and its topics/source
+- Record to Cortex:
+  ```bash
+  node {baseDir}/scripts/cortex-api.mjs like "{title}" --source "{source}" --topics "{topics}" --url "{url}"
+  ```
+- Respond: "已记住！以后会多推荐 {topics} 相关的内容。"
+
+**If user says "不感兴趣 X" or negative feedback** (e.g., "无聊", "不想看这类"):
+- Record to Cortex:
+  ```bash
+  node {baseDir}/scripts/cortex-api.mjs dislike "{title}" --source "{source}" --topics "{topics}"
+  ```
+- Respond: "收到，以后会减少推荐 {topics} 类内容。"
+
+**If user adjusts preferences** (e.g., "多看看AI安全", "少推荐区块链"):
+- Record explicit preference:
+  ```bash
+  node {baseDir}/scripts/cortex-api.mjs remember "User wants more articles about: {topic}" --category preference --importance 0.9
+  ```
+  or for negative:
+  ```bash
+  node {baseDir}/scripts/cortex-api.mjs remember "User wants fewer articles about: {topic}" --category preference --importance 0.8
+  ```
+- Respond with confirmation and immediately re-score remaining articles with updated preferences
+
+**If user says "下一页" or "更多"**:
+- Show the next batch of articles (items N+1 to N+5 from the scored list)
+- Continue the feedback loop
+
+**If user says "保存 X"**:
+- Execute the Blinko save flow (see Save to Blinko section)
+- Record the save action to Cortex
+
+**If user says "结束" / "够了" / "谢谢"**:
+- Proceed to Step 9
+
+### Step 9: Session Summary & Cortex Log
+
+At the end of the conversation, summarize what was learned and log to Cortex:
 
 ```bash
 node {baseDir}/scripts/cortex-api.mjs digest-log "{date}" \
@@ -172,7 +234,14 @@ node {baseDir}/scripts/cortex-api.mjs digest-log "{date}" \
   --feeds 45
 ```
 
-This builds the preference model over time.
+Also store a session-level observation:
+```bash
+node {baseDir}/scripts/cortex-api.mjs remember \
+  "Digest session {date}: User liked {liked_topics}, disliked {disliked_topics}. Saved {N} articles. Spent most time on {main_topic}. Preference trend: {observation}" \
+  --category agent_user_habit --importance 0.7
+```
+
+This builds the long-term preference model.
 
 ## Personalized Recommendations (/recommend)
 
