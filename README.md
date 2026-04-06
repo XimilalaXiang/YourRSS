@@ -1,5 +1,7 @@
 # YourRSS
 
+[English](./README.md) | [中文](./README_CN.md)
+
 Your personal AI-powered RSS digest — built on self-hosted FreshRSS.
 
 YourRSS fetches articles from your FreshRSS instance, scores them by relevance and quality with AI, generates concise summaries, and learns your reading preferences through [Cortex](https://github.com/rikouu/cortex) Memory. Every digest gets smarter.
