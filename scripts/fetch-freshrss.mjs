@@ -132,22 +132,48 @@ async function unsubscribe(token, feedId) {
 
 async function subscribe(token, feedUrl, categoryName) {
   const editToken = await getEditToken(token);
-  const url = `${API_BASE}/reader/api/0/subscription/edit`;
-  let body = `ac=subscribe&s=feed/${encodeURIComponent(feedUrl)}&T=${encodeURIComponent(editToken)}`;
-  if (categoryName) {
-    body += `&a=user/-/label/${encodeURIComponent(categoryName)}`;
-  }
-  const res = await fetch(url, {
+
+  const qaUrl = `${API_BASE}/reader/api/0/subscription/quickadd`;
+  const qaBody = `quickadd=${encodeURIComponent(feedUrl)}&T=${encodeURIComponent(editToken)}`;
+  const qaRes = await fetch(qaUrl, {
     method: 'POST',
     headers: {
       'Authorization': `GoogleLogin auth=${token}`,
       'Content-Type': 'application/x-www-form-urlencoded',
     },
-    body,
+    body: qaBody,
   });
-  const text = await res.text();
-  if (text.trim() !== 'OK') throw new Error(`Subscribe failed: ${text}`);
-  return { status: 'ok', action: 'subscribed', feedUrl, category: categoryName || 'uncategorized' };
+  const qaData = await qaRes.json();
+  if (!qaData.streamId) {
+    throw new Error(`Subscribe failed: ${JSON.stringify(qaData)}`);
+  }
+
+  if (categoryName) {
+    const editUrl = `${API_BASE}/reader/api/0/subscription/edit`;
+    const editBody = [
+      `ac=edit`,
+      `s=${encodeURIComponent(qaData.streamId)}`,
+      `a=user/-/label/${encodeURIComponent(categoryName)}`,
+      `T=${encodeURIComponent(editToken)}`,
+    ].join('&');
+    await fetch(editUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `GoogleLogin auth=${token}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: editBody,
+    });
+  }
+
+  return {
+    status: 'ok',
+    action: 'subscribed',
+    feedUrl,
+    streamId: qaData.streamId,
+    streamName: qaData.streamName,
+    category: categoryName || 'uncategorized',
+  };
 }
 
 async function getArticles(token) {
