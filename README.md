@@ -7,8 +7,13 @@ Works with **OpenClaw**, **Cursor**, **Claude Code**, **OpenCode**, and any AI a
 ## Features
 
 - **Smart Digest** — AI scores and summarizes your FreshRSS articles into a daily briefing
+- **Flexible AI Provider** — Use the current Agent (free with Cursor) or an external cheap model (OpenAI, Gemini, DeepSeek, Qwen, Ollama, or any gateway)
+- **Full-text Analysis** — Scores based on complete article content, not just summaries
+- **Concurrent Processing** — Configurable batch size and concurrency for fast scoring (200 articles in ~2min)
+- **Two-phase Scoring** — Lightweight scores for all articles + detailed summaries for top N
 - **Personalized Recommendations** — Cortex Memory `reader` agent learns what you like
 - **Preference Learning** — Like/dislike to teach the system; explicit `/prefer` commands
+- **Feed Management** — Subscribe/unsubscribe feeds directly via commands
 - **Blinko Integration** — Save highlights to your Blinko knowledge base
 - **Multi-language** — Chinese and English output
 - **Category Filtering** — Focus on specific FreshRSS categories
@@ -52,7 +57,20 @@ export CORTEX_AGENT="reader"              # isolated namespace for RSS
 
 The `reader` agent is auto-created on first use. Your RSS preferences are isolated from other Cortex agents.
 
-### 3. Blinko (Optional)
+### 3. AI Scoring Provider (Optional)
+
+```bash
+# "agent" = Agent handles scoring (free with Cursor)
+# "openai" = external OpenAI-compatible API (saves Agent tokens)
+export AI_PROVIDER="agent"
+export AI_BASE_URL="https://api.openai.com/v1"   # or your gateway
+export AI_API_KEY="sk-..."
+export AI_MODEL="gpt-4o-mini"
+```
+
+Compatible with: OpenAI, Gemini, DeepSeek, Qwen, Ollama, or any OpenAI-compatible proxy.
+
+### 4. Blinko (Optional)
 
 ```bash
 export BLINKO_URL="https://your-blinko-instance.com"
@@ -97,6 +115,8 @@ Next digest ← scores biased by preferences ← Cortex recalls
 |--------|---------|
 | `scripts/fetch-freshrss.mjs` | FreshRSS Google Reader API client |
 | `scripts/cortex-api.mjs` | Cortex Memory REST API client |
+| `scripts/score-articles.mjs` | AI scoring: agent passthrough or external OpenAI API |
+| `scripts/load-env.mjs` | Load .env config (shared by all scripts) |
 | `scripts/fetch-rss.mjs` | Static RSS fetcher (legacy fallback) |
 
 ### fetch-freshrss.mjs
@@ -111,11 +131,38 @@ node scripts/fetch-freshrss.mjs --hours 24 --category "Technology" --unread
 # List categories / feeds
 node scripts/fetch-freshrss.mjs --categories
 node scripts/fetch-freshrss.mjs --feeds
+
+# Subscribe / unsubscribe
+node scripts/fetch-freshrss.mjs --subscribe "https://example.com/feed.xml" --subscribe-category "Tech"
+node scripts/fetch-freshrss.mjs --unsubscribe "feed/123"
+```
+
+### score-articles.mjs
+
+```bash
+# Score via external OpenAI-compatible API (saves Agent tokens)
+node scripts/fetch-freshrss.mjs --hours 24 --count 100 \
+  | node scripts/score-articles.mjs --top 15 --language zh
+
+# With user preferences from Cortex
+node scripts/cortex-api.mjs preferences > /tmp/prefs.json
+node scripts/fetch-freshrss.mjs --hours 48 --count 200 \
+  | node scripts/score-articles.mjs --top 15 --preferences /tmp/prefs.json
+
+# Tune batch size and concurrency
+node scripts/fetch-freshrss.mjs --hours 72 --count 200 \
+  | node scripts/score-articles.mjs --top 20 --batch-size 10 --concurrency 20
+
+# Override model on-the-fly
+... | node scripts/score-articles.mjs --provider openai --model gpt-4o-mini
 ```
 
 ### cortex-api.mjs
 
 ```bash
+# Initialize reader agent (run once)
+node scripts/cortex-api.mjs init
+
 # Get user preferences
 node scripts/cortex-api.mjs preferences
 
@@ -135,12 +182,15 @@ node scripts/cortex-api.mjs digest-log "2026-04-06" --topics "AI,Security" --art
 ## Project Structure
 
 ```
-freshrss-ai-digest/
+YourRSS/
 ├── SKILL.md                  # Skill definition (AI workflow + Cortex + Blinko)
 ├── README.md
+├── .env.example              # Environment variable template
 ├── scripts/
 │   ├── fetch-freshrss.mjs    # FreshRSS API client (Node.js, zero deps)
+│   ├── score-articles.mjs    # AI scoring: agent passthrough or external API
 │   ├── cortex-api.mjs        # Cortex Memory REST API client (zero deps)
+│   ├── load-env.mjs          # .env loader (shared by all scripts)
 │   └── fetch-rss.mjs         # Static RSS fetcher (legacy)
 └── references/
     └── sources.json           # Fallback static sources

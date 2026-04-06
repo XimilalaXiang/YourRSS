@@ -14,6 +14,8 @@
  *   --language LANG      Summary language: zh/en (default: zh)
  *   --provider MODE      Override AI_PROVIDER from .env: agent/openai
  *   --model MODEL        Override AI_MODEL from .env
+ *   --batch-size N       Articles per batch (default: 10)
+ *   --concurrency N      Max concurrent API calls (default: 20)
  *   --preferences FILE   JSON file with user preferences from Cortex
  *                         (generate via: node cortex-api.mjs preferences > prefs.json)
  *
@@ -43,6 +45,8 @@ const model = getArg('model', process.env.AI_MODEL || 'gpt-4o-mini');
 const baseUrl = (process.env.AI_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
 const apiKey = process.env.AI_API_KEY || '';
 const prefsFile = getArg('preferences', '');
+const batchSize = parseInt(getArg('batch-size', '10'));
+const concurrency = parseInt(getArg('concurrency', '20'));
 
 function loadPreferences() {
   if (!prefsFile) return null;
@@ -357,7 +361,6 @@ async function main() {
   } else if (provider === 'openai') {
     process.stderr.write(`[score] Calling ${baseUrl} with model ${model}...\n`);
 
-    const batchSize = 30;
     let allScored = [];
     const useTwoPhase = articles.length > batchSize;
 
@@ -366,37 +369,37 @@ async function main() {
       const prompt = buildScoringPrompt(articles, language, prefs);
       allScored = await callOpenAI(prompt);
     } else {
-      const totalBatches = Math.ceil(articles.length / batchSize);
-      process.stderr.write(`[score] Phase 1: lightweight scoring — ${totalBatches} batches (concurrent)\n`);
-
-      const batchPromises = [];
+      const batches = [];
       for (let i = 0; i < articles.length; i += batchSize) {
-        const batch = articles.slice(i, i + batchSize);
-        const batchNum = Math.floor(i / batchSize) + 1;
-        const offset = i;
-        batchPromises.push(
-          (async () => {
-            process.stderr.write(`[score] Batch ${batchNum}: articles ${offset}-${offset + batch.length - 1} (started)\n`);
-            try {
-              const prompt = buildLightScoringPrompt(batch, language, prefs);
-              const results = await callOpenAI(prompt);
-              for (const r of results) {
-                r.index = (r.index || 0) + offset;
-              }
-              process.stderr.write(`[score] Batch ${batchNum}: done (${results.length} scored)\n`);
-              return results;
-            } catch (err) {
-              process.stderr.write(`[score] Batch ${batchNum}: FAILED (${err.message})\n`);
-              return [];
-            }
-          })()
-        );
+        batches.push({ offset: i, items: articles.slice(i, i + batchSize) });
+      }
+      process.stderr.write(`[score] Phase 1: lightweight scoring — ${batches.length} batches × ${batchSize} articles, concurrency=${concurrency}\n`);
+
+      async function runBatch(batch, batchNum) {
+        process.stderr.write(`[score] Batch ${batchNum}: articles ${batch.offset}-${batch.offset + batch.items.length - 1} (started)\n`);
+        try {
+          const prompt = buildLightScoringPrompt(batch.items, language, prefs);
+          const results = await callOpenAI(prompt);
+          for (const r of results) {
+            r.index = (r.index || 0) + batch.offset;
+          }
+          process.stderr.write(`[score] Batch ${batchNum}: done (${results.length} scored)\n`);
+          return results;
+        } catch (err) {
+          process.stderr.write(`[score] Batch ${batchNum}: FAILED (${err.message})\n`);
+          return [];
+        }
       }
 
-      const batchResults = await Promise.all(batchPromises);
-      for (const results of batchResults) {
-        allScored.push(...results);
+      const allResults = [];
+      for (let i = 0; i < batches.length; i += concurrency) {
+        const chunk = batches.slice(i, i + concurrency);
+        const chunkResults = await Promise.all(
+          chunk.map((b, j) => runBatch(b, i + j + 1))
+        );
+        for (const r of chunkResults) allResults.push(...r);
       }
+      allScored = allResults;
       process.stderr.write(`[score] Phase 1 complete: ${allScored.length}/${articles.length} articles scored\n`);
 
       for (const r of allScored) {
