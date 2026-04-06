@@ -264,6 +264,16 @@ async function main() {
       }
     }
 
+    for (const r of allScored) {
+      const idx = r.index ?? -1;
+      if (idx >= 0 && idx < articles.length) {
+        const orig = articles[idx];
+        if (!r.url || r.url === '') r.url = orig.link || orig.url || '';
+        if (!r.source || r.source === '') r.source = orig.source || '';
+        if (!r.title || r.title === '') r.title = orig.title || '';
+      }
+    }
+
     allScored.sort((a, b) => (b.weighted_score || 0) - (a.weighted_score || 0));
     const topResults = allScored.slice(0, topN);
 
