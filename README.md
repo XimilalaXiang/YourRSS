@@ -27,7 +27,7 @@ Then: `/digest`
 ### Cursor / Claude Code / Other Agents
 
 ```bash
-git clone https://github.com/XimilalaXiang/freshrss-ai-digest.git
+git clone https://github.com/XimilalaXiang/YourRSS.git
 ```
 
 Reference the `SKILL.md` in your agent configuration.
