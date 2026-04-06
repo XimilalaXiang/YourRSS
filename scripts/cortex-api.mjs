@@ -10,11 +10,14 @@
  *   node cortex-api.mjs stats
  *   node cortex-api.mjs preferences
  *
- * Required env vars:
+ * Required env vars (or .env file in skill root):
  *   CORTEX_URL   — Cortex server URL (default: http://localhost:21100)
  *   CORTEX_TOKEN — Auth token (optional)
  *   CORTEX_AGENT — Agent ID (default: reader)
  */
+
+import { loadEnv } from './load-env.mjs';
+loadEnv();
 
 const CORTEX_URL = (process.env.CORTEX_URL || 'http://localhost:21100').replace(/\/$/, '');
 const CORTEX_TOKEN = process.env.CORTEX_TOKEN || '';

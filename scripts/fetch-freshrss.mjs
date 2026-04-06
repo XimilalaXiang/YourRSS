@@ -6,11 +6,14 @@
  * Usage: node fetch-freshrss.mjs [--hours 24] [--count 50] [--category NAME] [--unread]
  * Output: JSON array of articles to stdout
  *
- * Required env vars:
+ * Required env vars (or .env file in skill root):
  *   FRESHRSS_URL          — Your FreshRSS instance URL
  *   FRESHRSS_USER         — Your FreshRSS username
  *   FRESHRSS_API_PASSWORD — Your FreshRSS API password
  */
+
+import { loadEnv } from './load-env.mjs';
+loadEnv();
 
 const args = process.argv.slice(2);
 
