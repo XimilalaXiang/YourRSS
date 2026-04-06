@@ -118,6 +118,12 @@ function buildScoringPrompt(articles, lang, prefs) {
     prefsBlock += `\nApply these multipliers to the relevance score before computing weighted_score.\n`;
   }
 
+  const articleBlock = articles.map((a, i) => {
+    const text = a.content || a.summary || '';
+    const displayText = text.length > 1500 ? text.slice(0, 1500) + '...' : text;
+    return `[${i}] Title: ${a.title}\n    Source: ${a.source}\n    Time: ${a.date || a.published || ''}\n    Content (${text.length} chars): ${displayText}\n    URL: ${a.link || a.url || ''}`;
+  }).join('\n\n');
+
   return `You are an AI article curator. Score and rank ALL ${articles.length} articles.
 
 ${langInstruction}
@@ -155,13 +161,82 @@ Return a JSON array of ALL ${articles.length} articles sorted by weighted_score 
 IMPORTANT: Return ALL ${articles.length} articles, not just top ${topN}. Lower-ranked articles should still have index, title, source, url, scores, and category — just omit summary/title_zh/keywords.
 
 Articles to score:
-${articles.map((a, i) => {
-  const text = a.content || a.summary || '';
-  const displayText = text.length > 1500 ? text.slice(0, 1500) + '...' : text;
-  return `[${i}] Title: ${a.title}\n    Source: ${a.source}\n    Time: ${a.date || a.published || ''}\n    Content (${text.length} chars): ${displayText}\n    URL: ${a.link || a.url || ''}`;
-}).join('\n\n')}
+${articleBlock}
 
 Return ONLY the JSON array, no markdown fences, no explanation.`;
+}
+
+function buildLightScoringPrompt(articles, lang, prefs) {
+  const langInstruction = lang === 'zh'
+    ? 'Respond with Chinese summaries and title translations.'
+    : 'Respond in English.';
+
+  let prefsBlock = '';
+  if (prefs) {
+    if (prefs.liked_topics.length > 0) {
+      prefsBlock += `**Liked topics** (boost relevance ×1.3): ${prefs.liked_topics.join(', ')}\n`;
+    }
+    if (prefs.disliked_topics.length > 0) {
+      prefsBlock += `**Disliked topics** (reduce relevance ×0.5): ${prefs.disliked_topics.join(', ')}\n`;
+    }
+    if (prefs.preferred_topics.length > 0) {
+      prefsBlock += `**Preferred topics** (boost relevance ×1.5): ${prefs.preferred_topics.join(', ')}\n`;
+    }
+    if (prefs.preferred_sources.length > 0) {
+      prefsBlock += `**Preferred sources** (boost relevance ×1.2): ${prefs.preferred_sources.join(', ')}\n`;
+    }
+    if (prefsBlock) prefsBlock += `\nApply these multipliers to the relevance score.\n`;
+  }
+
+  return `You are an AI article curator. Score ALL ${articles.length} articles with lightweight scores only — no summaries needed.
+
+${langInstruction}
+${prefsBlock}
+For EVERY article, return:
+- **index**: original article index
+- **weighted_score**: (relevance × 0.4 + quality × 0.4 + timeliness × 0.2) × 10
+- **category**: One of 🤖AI/ML, 🔒Security, ⚙️Engineering, 🛠Tools/OSS, 💡Opinion, 🌐Web/Frontend, 📊Data/Infra, 📝Other
+
+Return a JSON array sorted by weighted_score descending:
+[{"index": 0, "weighted_score": 85, "category": "🤖AI/ML"}, ...]
+
+Articles to score:
+${articles.map((a, i) => {
+  const text = a.content || a.summary || '';
+  const displayText = text.length > 800 ? text.slice(0, 800) + '...' : text;
+  return `[${i}] ${a.title} | ${a.source} | ${displayText.slice(0, 200)}`;
+}).join('\n')}
+
+Return ONLY the JSON array.`;
+}
+
+function buildDetailPrompt(articles, lang, prefs) {
+  const langInstruction = lang === 'zh'
+    ? 'Respond with Chinese summaries and title translations.'
+    : 'Respond in English.';
+
+  return `You are an AI article curator. Provide detailed analysis for these ${articles.length} top-ranked articles.
+
+${langInstruction}
+
+For each article, provide:
+- **index**: the original index
+- **summary**: 2-3 sentence summary (problem → insight → conclusion)
+- **title_zh**: Chinese title translation
+- **keywords**: 2-3 keyword tags
+${prefs ? '- **recommendation_reason**: Why this matches user preferences (1 sentence)' : ''}
+
+Return a JSON array:
+[{"index": 0, "summary": "...", "title_zh": "...", "keywords": ["tag1"]}]
+
+Articles:
+${articles.map(a => {
+  const text = a.content || a.summary || '';
+  const displayText = text.length > 1500 ? text.slice(0, 1500) + '...' : text;
+  return `[${a._origIndex}] Title: ${a.title}\n    Source: ${a.source}\n    Content: ${displayText}\n    URL: ${a.link || a.url || ''}`;
+}).join('\n\n')}
+
+Return ONLY the JSON array.`;
 }
 
 async function callOpenAI(prompt) {
@@ -192,11 +267,22 @@ async function callOpenAI(prompt) {
   }
 
   const data = await res.json();
-  const content = data.choices?.[0]?.message?.content || '';
+  let content = data.choices?.[0]?.message?.content || '';
+  content = content.replace(/^```(?:json)?\s*\n?/gm, '').replace(/\n?```\s*$/gm, '').trim();
 
-  const jsonMatch = content.match(/\[[\s\S]*\]/);
+  let jsonMatch = content.match(/\[[\s\S]*\]/);
   if (!jsonMatch) {
-    throw new Error(`AI returned non-JSON response: ${content.slice(0, 500)}`);
+    const trimmed = content.trim();
+    if (trimmed.startsWith('[')) {
+      process.stderr.write(`[score] JSON array incomplete (truncated), attempting repair...\n`);
+      const lastObj = trimmed.lastIndexOf('}');
+      if (lastObj > 0) {
+        jsonMatch = [trimmed.slice(0, lastObj + 1) + ']'];
+      }
+    }
+    if (!jsonMatch) {
+      throw new Error(`AI returned non-JSON response: ${content.slice(0, 500)}`);
+    }
   }
 
   let jsonStr = jsonMatch[0];
@@ -273,21 +359,63 @@ async function main() {
 
     const batchSize = 30;
     let allScored = [];
+    const useTwoPhase = articles.length > batchSize;
 
-    if (articles.length <= batchSize) {
+    if (!useTwoPhase) {
+      process.stderr.write(`[score] Single batch: full scoring with details\n`);
       const prompt = buildScoringPrompt(articles, language, prefs);
       allScored = await callOpenAI(prompt);
     } else {
-      process.stderr.write(`[score] Large input: splitting into batches of ${batchSize}\n`);
+      process.stderr.write(`[score] Phase 1: lightweight scoring in ${Math.ceil(articles.length / batchSize)} batches\n`);
       for (let i = 0; i < articles.length; i += batchSize) {
         const batch = articles.slice(i, i + batchSize);
-        process.stderr.write(`[score] Batch ${Math.floor(i/batchSize) + 1}: articles ${i}-${i + batch.length - 1}\n`);
-        const prompt = buildScoringPrompt(batch, language, prefs);
+        const batchNum = Math.floor(i / batchSize) + 1;
+        process.stderr.write(`[score] Batch ${batchNum}: articles ${i}-${i + batch.length - 1}\n`);
+        const prompt = buildLightScoringPrompt(batch, language, prefs);
         const batchResults = await callOpenAI(prompt);
         for (const r of batchResults) {
           r.index = (r.index || 0) + i;
         }
         allScored.push(...batchResults);
+      }
+
+      for (const r of allScored) {
+        const idx = r.index ?? -1;
+        if (idx >= 0 && idx < articles.length) {
+          const orig = articles[idx];
+          r.title = r.title || orig.title || '';
+          r.source = r.source || orig.source || '';
+          r.url = r.url || orig.link || orig.url || '';
+        }
+      }
+
+      allScored.sort((a, b) => (b.weighted_score || 0) - (a.weighted_score || 0));
+
+      process.stderr.write(`[score] Phase 2: detailed summaries for top ${topN}\n`);
+      const topItems = allScored.slice(0, topN);
+      const topArticles = topItems.map(r => {
+        const orig = articles[r.index] || {};
+        return { ...orig, _origIndex: r.index };
+      });
+
+      try {
+        const detailPrompt = buildDetailPrompt(topArticles, language, prefs);
+        const details = await callOpenAI(detailPrompt);
+        const detailMap = new Map();
+        for (const d of details) {
+          detailMap.set(d.index, d);
+        }
+        for (const r of topItems) {
+          const d = detailMap.get(r.index);
+          if (d) {
+            r.summary = d.summary || '';
+            r.title_zh = d.title_zh || '';
+            r.keywords = d.keywords || [];
+            if (d.recommendation_reason) r.recommendation_reason = d.recommendation_reason;
+          }
+        }
+      } catch (err) {
+        process.stderr.write(`[score] Phase 2 failed (results still valid without summaries): ${err.message}\n`);
       }
     }
 
