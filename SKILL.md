@@ -51,6 +51,7 @@ export BLINKO_TOKEN="your-blinko-api-token"
 ### Save: `/save [number]`
 ### Preference: `/like [number]`, `/dislike [number]`, `/prefer topic:X`
 ### Browse: `/feeds`, `/categories`
+### Manage: `/unsubscribe [feed]`, `/subscribe [url]`
 
 ## Workflow
 
@@ -79,6 +80,15 @@ List categories / feeds:
 ```bash
 node {baseDir}/scripts/fetch-freshrss.mjs --categories
 node {baseDir}/scripts/fetch-freshrss.mjs --feeds
+```
+
+Manage subscriptions:
+```bash
+# Unsubscribe by feed ID (get IDs from --feeds)
+node {baseDir}/scripts/fetch-freshrss.mjs --unsubscribe "feed/123"
+
+# Subscribe to new feed
+node {baseDir}/scripts/fetch-freshrss.mjs --subscribe "https://example.com/feed.xml" --subscribe-category "Technology"
 ```
 
 Capture the JSON output from stdout.

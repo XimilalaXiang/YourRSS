@@ -29,6 +29,9 @@ const category = getArg('category', '');
 const unreadOnly = args.includes('--unread');
 const listCategories = args.includes('--categories');
 const listFeeds = args.includes('--feeds');
+const unsubscribeFeed = getArg('unsubscribe', '');
+const subscribeFeed = getArg('subscribe', '');
+const subscribeCategory = getArg('subscribe-category', '');
 
 const FRESHRSS_URL = process.env.FRESHRSS_URL;
 const FRESHRSS_USER = process.env.FRESHRSS_USER;
@@ -102,6 +105,51 @@ async function getFeeds(token) {
   }));
 }
 
+async function getEditToken(token) {
+  const url = `${API_BASE}/reader/api/0/token`;
+  const res = await fetch(url, {
+    headers: { 'Authorization': `GoogleLogin auth=${token}` },
+  });
+  return (await res.text()).trim();
+}
+
+async function unsubscribe(token, feedId) {
+  const editToken = await getEditToken(token);
+  const url = `${API_BASE}/reader/api/0/subscription/edit`;
+  const body = `ac=unsubscribe&s=${encodeURIComponent(feedId)}&T=${encodeURIComponent(editToken)}`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': `GoogleLogin auth=${token}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body,
+  });
+  const text = await res.text();
+  if (text.trim() !== 'OK') throw new Error(`Unsubscribe failed: ${text}`);
+  return { status: 'ok', action: 'unsubscribed', feedId };
+}
+
+async function subscribe(token, feedUrl, categoryName) {
+  const editToken = await getEditToken(token);
+  const url = `${API_BASE}/reader/api/0/subscription/edit`;
+  let body = `ac=subscribe&s=feed/${encodeURIComponent(feedUrl)}&T=${encodeURIComponent(editToken)}`;
+  if (categoryName) {
+    body += `&a=user/-/label/${encodeURIComponent(categoryName)}`;
+  }
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': `GoogleLogin auth=${token}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body,
+  });
+  const text = await res.text();
+  if (text.trim() !== 'OK') throw new Error(`Subscribe failed: ${text}`);
+  return { status: 'ok', action: 'subscribed', feedUrl, category: categoryName || 'uncategorized' };
+}
+
 async function getArticles(token) {
   let stream = 'stream/contents';
   if (category) {
@@ -160,6 +208,20 @@ async function main() {
     const feeds = await getFeeds(token);
     process.stderr.write(`[fetch-freshrss] Found ${feeds.length} feeds\n`);
     process.stdout.write(JSON.stringify(feeds, null, 2));
+    return;
+  }
+
+  if (unsubscribeFeed) {
+    const result = await unsubscribe(token, unsubscribeFeed);
+    process.stderr.write(`[fetch-freshrss] Unsubscribed: ${unsubscribeFeed}\n`);
+    process.stdout.write(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  if (subscribeFeed) {
+    const result = await subscribe(token, subscribeFeed, subscribeCategory);
+    process.stderr.write(`[fetch-freshrss] Subscribed: ${subscribeFeed}\n`);
+    process.stdout.write(JSON.stringify(result, null, 2));
     return;
   }
 
