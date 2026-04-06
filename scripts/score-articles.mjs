@@ -118,26 +118,28 @@ function buildScoringPrompt(articles, lang, prefs) {
     prefsBlock += `\nApply these multipliers to the relevance score before computing weighted_score.\n`;
   }
 
-  return `You are an AI article curator. Score and rank the following ${articles.length} articles.
+  return `You are an AI article curator. Score and rank ALL ${articles.length} articles.
 
 ${langInstruction}
 ${prefsBlock}
-For each article, provide:
-1. **relevance** (1-10): How relevant to the user's interests${prefs ? ' (apply preference multipliers above)' : ' (general tech/AI/engineering)'}
-2. **quality** (1-10): Depth, originality, substance
-3. **timeliness** (1-10): Breaking news vs evergreen
-4. **weighted_score**: (relevance × 0.4 + quality × 0.4 + timeliness × 0.2) × 10
-5. **category**: One of 🤖AI/ML, 🔒Security, ⚙️Engineering, 🛠Tools/OSS, 💡Opinion, 🌐Web/Frontend, 📊Data/Infra, 📝Other
-6. **summary**: 2-3 sentence summary (problem → insight → conclusion)
-7. **title_zh**: Chinese title translation (if lang=zh)
-8. **keywords**: 2-3 keyword tags
-${prefs ? '9. **recommendation_reason**: Why this article matches user preferences (1 sentence)' : ''}
+For EVERY article, provide a lightweight score entry:
+- **index**: original article index number
+- **relevance** (1-10): How relevant to the user's interests${prefs ? ' (apply preference multipliers above)' : ' (general tech/AI/engineering)'}
+- **quality** (1-10): Depth, originality, substance
+- **timeliness** (1-10): Breaking news vs evergreen
+- **weighted_score**: (relevance × 0.4 + quality × 0.4 + timeliness × 0.2) × 10
+- **category**: One of 🤖AI/ML, 🔒Security, ⚙️Engineering, 🛠Tools/OSS, 💡Opinion, 🌐Web/Frontend, 📊Data/Infra, 📝Other
 
-Return a JSON array of the top ${topN} articles sorted by weighted_score descending:
+For the TOP ${topN} articles (highest weighted_score), ALSO include:
+- **summary**: 2-3 sentence summary (problem → insight → conclusion)
+- **title_zh**: Chinese title translation (if lang=zh)
+- **keywords**: 2-3 keyword tags
+${prefs ? '- **recommendation_reason**: Why this article matches user preferences (1 sentence)' : ''}
+
+Return a JSON array of ALL ${articles.length} articles sorted by weighted_score descending:
 [{
   "index": <original article index>,
   "title": "<original title>",
-  "title_zh": "<Chinese translation>",
   "source": "<source name>",
   "url": "<article URL>",
   "relevance": <1-10>,
@@ -145,9 +147,12 @@ Return a JSON array of the top ${topN} articles sorted by weighted_score descend
   "timeliness": <1-10>,
   "weighted_score": <0-100>,
   "category": "<emoji category>",
-  "summary": "<2-3 sentences>",
-  "keywords": ["tag1", "tag2"]${prefs ? ',\n  "recommendation_reason": "<why this matches user prefs>"' : ''}
+  "summary": "<2-3 sentences, ONLY for top ${topN}>",
+  "title_zh": "<Chinese translation, ONLY for top ${topN}>",
+  "keywords": ["tag1", "tag2"]${prefs ? ',\n  "recommendation_reason": "<ONLY for top ' + topN + '>"' : ''}
 }]
+
+IMPORTANT: Return ALL ${articles.length} articles, not just top ${topN}. Lower-ranked articles should still have index, title, source, url, scores, and category — just omit summary/title_zh/keywords.
 
 Articles to score:
 ${articles.map((a, i) => {
@@ -297,7 +302,15 @@ async function main() {
     }
 
     allScored.sort((a, b) => (b.weighted_score || 0) - (a.weighted_score || 0));
-    const topResults = allScored.slice(0, topN);
+    const topDetailed = allScored.slice(0, topN);
+    const rest = allScored.slice(topN).map(r => ({
+      index: r.index,
+      title: r.title,
+      source: r.source,
+      url: r.url,
+      weighted_score: r.weighted_score,
+      category: r.category,
+    }));
 
     const output = {
       mode: 'openai',
@@ -307,10 +320,11 @@ async function main() {
       top_n: topN,
       language,
       preferences: prefs,
-      results: topResults,
+      top_articles: topDetailed,
+      remaining_articles: rest,
     };
     process.stdout.write(JSON.stringify(output, null, 2));
-    process.stderr.write(`[score] Done: ${topResults.length} top articles selected\n`);
+    process.stderr.write(`[score] Done: ${topDetailed.length} detailed + ${rest.length} ranked = ${allScored.length} total\n`);
   } else {
     process.stderr.write(`[score] Unknown provider: ${provider}\n`);
     process.exit(1);
