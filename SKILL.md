@@ -1,11 +1,11 @@
 ---
-name: freshrss-ai-digest
-description: "AI-powered RSS digest from your FreshRSS instance with personalized recommendations via Cortex Memory API. Trigger with /digest, /recommend, or ask for news/headlines. Fetches articles via FreshRSS API, scores by relevance/quality, generates summaries, learns preferences via Cortex REST API (agent: reader), and saves highlights to Blinko."
+name: yourrss
+description: "AI-powered RSS digest from your FreshRSS instance with personalized recommendations via Cortex Memory API. Trigger with /digest, /recommend, or ask for news/headlines. Fetches articles via FreshRSS API, scores by relevance/quality using configurable AI provider (agent or external OpenAI-compatible API), generates summaries, learns preferences via Cortex REST API (agent: reader), and saves highlights to Blinko."
 ---
 
-# FreshRSS AI Digest
+# YourRSS — FreshRSS AI Digest
 
-AI-powered daily digest from your self-hosted FreshRSS instance. Scores, summarizes, and recommends articles based on your reading preferences stored in Cortex Memory (agent: `reader`).
+AI-powered daily digest from your self-hosted FreshRSS instance. Scores, summarizes, and recommends articles based on your reading preferences stored in Cortex Memory (agent: `reader`). Supports flexible AI provider selection — use the current Agent (free with Cursor) or an external cheap model (save tokens with Claude Code).
 
 ## Setup
 
@@ -26,6 +26,21 @@ export CORTEX_URL="http://localhost:21100"
 export CORTEX_TOKEN="your-cortex-auth-token"    # optional if no auth
 export CORTEX_AGENT="reader"                     # isolated agent for RSS preferences
 ```
+
+### Optional: AI Scoring Provider
+
+Choose who does the scoring and summarization work:
+
+```bash
+# "agent" = you (the Agent) handle scoring directly — best when tokens are free (e.g. Cursor)
+# "openai" = call an external OpenAI-compatible API — best to save tokens (e.g. Claude Code)
+export AI_PROVIDER="agent"
+export AI_BASE_URL="https://api.openai.com/v1"   # or your gateway URL
+export AI_API_KEY="sk-..."
+export AI_MODEL="gpt-4o-mini"                      # any OpenAI-compatible model
+```
+
+Compatible APIs: OpenAI, Gemini, DeepSeek, Qwen, Ollama, your own vercel-gateway-tools proxy, etc.
 
 ### Optional: Blinko
 
@@ -112,9 +127,29 @@ Parse the returned memories to build a preference profile:
 
 If no preferences found (first run), proceed with neutral scoring.
 
-### Step 3: Score and classify
+### Step 3: Score and classify (AI Provider Selection)
 
-Score each article on three dimensions (1-10):
+Check `AI_PROVIDER` setting to decide who handles scoring:
+
+**Option A: AI_PROVIDER=openai (external model)**
+
+Use `score-articles.mjs` to offload scoring to a cheap external model:
+
+```bash
+node {baseDir}/scripts/fetch-freshrss.mjs --hours <HOURS> --count <COUNT> --unread \
+  | node {baseDir}/scripts/score-articles.mjs --top <N> --language zh
+```
+
+The script calls the configured OpenAI-compatible API, scores all articles, and returns a JSON with pre-computed scores, summaries, categories, and keywords. The Agent then just formats and presents the results — minimal token usage.
+
+Override model on-the-fly:
+```bash
+... | node {baseDir}/scripts/score-articles.mjs --top 10 --provider openai --model gemini-2.5-flash-lite
+```
+
+**Option B: AI_PROVIDER=agent (default — Agent does scoring)**
+
+The Agent processes scoring directly. Save the fetched articles from Step 1, then score each on three dimensions (1-10):
 
 1. **Relevance** — Match against user preferences from Cortex. If no prefs, score on general tech/AI relevance.
 2. **Quality** — Depth, originality, substance (from title + summary).
@@ -138,9 +173,13 @@ Classify:
 
 Select top N by weighted score.
 
-### Step 4: Generate summaries
+**In both cases**, the output should be a ranked list of articles with scores, categories, summaries, and keywords.
 
-For each selected article:
+### Step 4: Generate summaries (if not already done by score-articles.mjs)
+
+If using openai provider, summaries are already included in the scored output — skip to Step 5.
+
+If using agent provider, for each selected article:
 1. If summary > 100 chars, use it
 2. If not, use web_fetch to read full article
 3. Generate:
@@ -351,11 +390,23 @@ When user says `/save 3`:
    node {baseDir}/scripts/cortex-api.mjs remember "User saved article '{title}' from {source} about {topics} to Blinko" --category preference --importance 0.8
    ```
 
+## Scripts Reference
+
+| Script | Purpose |
+|--------|---------|
+| `fetch-freshrss.mjs` | Fetch articles, categories, feeds; subscribe/unsubscribe |
+| `cortex-api.mjs` | Cortex Memory CRUD: recall, remember, like, dislike, preferences |
+| `score-articles.mjs` | AI scoring: agent passthrough or external OpenAI API |
+| `load-env.mjs` | Load .env config (shared by all scripts) |
+
 ## Notes
 
 - Requires Node.js 18+ for the scripts
-- FreshRSS API password ≠ login password
-- Cortex agent `reader` is auto-created on first API call
+- FreshRSS API password ≠ login password (Settings → Profile → API Management)
+- Cortex agent `reader` is auto-created via `cortex-api.mjs init`
 - Works with OpenClaw, Cursor, Claude Code, OpenCode — any client that can run shell scripts
 - All data self-hosted: FreshRSS + Cortex + Blinko = your infrastructure
 - Default fetch: 50 articles; adjust --count for busier feeds
+- AI_PROVIDER=agent uses zero extra cost when your Agent has unlimited tokens
+- AI_PROVIDER=openai supports any OpenAI-compatible API (Gemini, DeepSeek, Qwen, Ollama, etc.)
+- All parameters are configurable via CLI args — nothing is hardcoded
